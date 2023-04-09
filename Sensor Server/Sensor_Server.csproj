@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>dotnet-Sensor_Server-e4a0c2de-cddc-4070-b404-29f8b3c77d0d</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="InfluxDB.Client" Version="4.10.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SensorDataManager\SensorDataManager.csproj" />
+  </ItemGroup>
+</Project>
