@@ -60,7 +60,7 @@ namespace SensorDataManager
 			while (true)
 			{
 				SensorDataFormat data;
-				Socket client = await serverSocket.AcceptAsync(token);
+				MQTT client = await serverSocket.AcceptAsync(token);
 				if (token.IsCancellationRequested) break;
 				try
 				{
