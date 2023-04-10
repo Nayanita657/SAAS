@@ -1,6 +1,7 @@
 ﻿using System.Net.Sockets;
 using System.Net;
 using System.Text;
+using MQTTnet;
 
 namespace SensorDataManager
 {
@@ -19,8 +20,14 @@ namespace SensorDataManager
 			for (int i = 0; i < 4; i++)
 				if (byte.TryParse(bits[i], out act_address[i]) == false)
 					throw new ArgumentException("address string is invalid!", nameof(address));
+				if(state == 1) // ON
+    			{
+      				client.publish(TOPIC, "on");
+      				Serial.println((String)TOPIC + " => on");
+    			}
 			return act_address;
 		}
+		//sending data through mqtt
 		public static IPEndPoint EndPoint(byte[] address, int port) => new(new IPAddress(address), port);
 		private static Socket GetSocket(IPEndPoint endPoint) => new(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 		private static (Socket sock, Task task) Client(byte[] address, int port)
