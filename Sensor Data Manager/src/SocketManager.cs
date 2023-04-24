@@ -10,7 +10,6 @@ namespace SensorDataManager
 		private static readonly Encoding Enc = Encoding.ASCII;
 		public enum ClientResponseType : byte { CouldNotConnect, GotNoResponse, GotWrongResponse, AllOk };
 		public const int Port = 29482;
-		public const string OK_FLAG = "OK", NO_FLAG = "NA";
 		public static byte[] GetByteAddress(string address)
 		{
 			string[] bits = address.Split('.');
@@ -20,14 +19,8 @@ namespace SensorDataManager
 			for (int i = 0; i < 4; i++)
 				if (byte.TryParse(bits[i], out act_address[i]) == false)
 					throw new ArgumentException("address string is invalid!", nameof(address));
-				if(state == 1) // ON
-    			{
-      				client.publish(TOPIC, "on");
-      				Serial.println((String)TOPIC + " => on");
-    			}
 			return act_address;
 		}
-		//sending data through mqtt
 		public static IPEndPoint EndPoint(byte[] address, int port) => new(new IPAddress(address), port);
 		private static Socket GetSocket(IPEndPoint endPoint) => new(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 		private static (Socket sock, Task task) Client(byte[] address, int port)
@@ -39,8 +32,8 @@ namespace SensorDataManager
 		}
 		public static bool CheckValid(string? address, string? port)
 		{
-			if(address== null)return false;
-			if(port== null) return false;
+			if (address == null) return false;
+			if (port == null) return false;
 			if (int.TryParse(port, out _) == false) return false;
 			try { GetByteAddress(address); } catch { return false; }
 			return true;
@@ -54,18 +47,22 @@ namespace SensorDataManager
 			s.Bind(ep);
 			return s;
 		}
-		public static async Task BeginServerActivity(Socket serverSocket, Action<SensorDataFormat> onRecieve, ILog log, CancellationToken token)
+		public static async Task BeginServerActivity(Socket serverSocket, Func<SensorDataFormat, double, byte> onRecieve, ILog log, CancellationToken token)
 		{
 			serverSocket.Listen(1000);
 			while (true)
 			{
 				SensorDataFormat data;
-				MQTT client = await serverSocket.AcceptAsync(token);
+				Socket client = await serverSocket.AcceptAsync(token);
+				var watch = new Stopwatch();
+				watch.Start();
 				if (token.IsCancellationRequested) break;
+				byte[] sendbuffer = new byte[2];
 				try
 				{
 					byte[] buffer = new byte[1024];
 					int received = client.Receive(buffer);
+					watch.Stop();
 					log.Log($"Recieved byte array of size {received}");
 					data = received == SensorDataFormat.ByteSize
 						? SensorDataFormat.Deserialize(buffer)
@@ -79,43 +76,50 @@ namespace SensorDataManager
 					if (client.Connected)
 						try
 						{
-							client.Send(Enc.GetBytes(NO_FLAG));
+							sendbuffer[0] = (byte)ClientResponseType.GotWrongResponse;
+							client.Send(sendbuffer);
 							log.Log("Sent NO flag successfully!");
 						}
 						catch { log.LogError("Client disconnected before being acknowledged!"); }
 					continue;
 				}
+				double time = -1;
+				if (watch.IsRunning == false) time = watch.Elapsed.TotalSeconds;
 				log.Log($"Recived data : \n{data.SerializedJsonString()}");
-				onRecieve(data);
+				byte mid = onRecieve(data, time);
 				log.Log("\n\nNow Sending OK flag...");
+				sendbuffer[0] = (byte)ClientResponseType.AllOk;
+				sendbuffer[1] = mid;
 				if (client.Connected)
 				{
 					try
 					{
-						client.Send(Enc.GetBytes(OK_FLAG));
+						client.Send(sendbuffer);
 						log.Log($"Sensor Data recived and processed successfully!");
 					}
 					catch { log.LogError("Client disconnected before being acknowledged!"); }
 				}
 			}
 		}
-		public static async Task<ClientResponseType> ClientSendData(string address, int port, byte[] data) =>
+		public static async Task<(ClientResponseType, byte)> ClientSendData(string address, int port, byte[] data) =>
 			await ClientSendData(GetByteAddress(address), port, data);
-		public static async Task<ClientResponseType> ClientSendData(byte[] address, int port, byte[] data)
+		public static async Task<(ClientResponseType, byte)> ClientSendData(byte[] address, int port, byte[] data)
 		{
 			Socket socket;
-			try 
+			try
 			{
 				Task t;
 				(socket, t) = Client(address, port);
 				await t;
 			}
-			catch { return ClientResponseType.CouldNotConnect; }
+			catch { return (ClientResponseType.CouldNotConnect, 0); }
 			try { _ = await socket.SendAsync(data, SocketFlags.None); }
-			catch { return ClientResponseType.GotNoResponse; }
-			byte[] buffer = new byte[32];
+			catch { return (ClientResponseType.GotNoResponse, 0); }
+			byte[] buffer = new byte[2];
 			int received = await socket.ReceiveAsync(buffer, SocketFlags.None);
-			return Encoding.UTF8.GetString(buffer, 0, received) == OK_FLAG? ClientResponseType.AllOk : ClientResponseType.GotWrongResponse;
+			ClientResponseType responseType = (ClientResponseType)buffer[0];
+			byte mid = buffer[1];
+			return (responseType, mid);
 		}
 	}
 }
