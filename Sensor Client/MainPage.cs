@@ -1,5 +1,6 @@
-﻿namespace Sensor_Client;
+namespace Sensor_Client;
 using Microsoft.Maui.Devices.Sensors;
+using Microsoft.Maui.Devices;
 
 using SensorDataManager;
 
@@ -7,18 +8,23 @@ using System.Numerics;
 
 public class MainPage : ContentPage
 {
-	private const int DelayTime = 750;
+	private const int DelayTime = 650;
 	enum State : byte { Disconnected, Connected_Sending, Connected_Delay };
 	private readonly Button _counterBtn, _cancelButton;
-	private State _state;
-	private Label _cell;
-	private ActivityIndicator _indicator;
-	private Task<SensorDataFormat?> runningTask;
-	private bool CancelledPressed;
-	private Entry _addressEntry, _portEntry; 
+	private readonly Label _cell;
+	private readonly ActivityIndicator _indicator;
+	private Task<SensorDataFormat?> _runningTask;
+	private bool _cancelledPressed;
+	private readonly Entry _addressEntry;
+	private const string Filename = "id.dat"; 
+	private readonly string _idFile;
+	private byte ID = 0;
 	public MainPage()
 	{
-		_state = State.Disconnected;
+		_idFile = Path.Combine(FileSystem.Current.CacheDirectory, Filename);
+		if (File.Exists(_idFile))
+			ID = byte.Parse(File.ReadAllText(_idFile));
+		_runningTask = null!;
 		Content = new ScrollView()
 		{
 			Content = new VerticalStackLayout()
@@ -42,7 +48,6 @@ public class MainPage : ContentPage
 						HorizontalTextAlignment = TextAlignment.Center,
 					},
 					(_addressEntry = new Entry() { Placeholder="Insert IP address of the destination server device", }),
-					(_portEntry =  new Entry() { Placeholder="Insert Port number destination server process", Keyboard=Keyboard.Numeric, }),
 					(_counterBtn = new Button(){Text="Connect",}),
 					(_cancelButton = new Button(){ Text="Cancel Connection", IsEnabled = false}),
 					(_indicator=new ActivityIndicator() { IsRunning = false, }),
@@ -51,11 +56,11 @@ public class MainPage : ContentPage
 			}
 		};
 		_counterBtn.Clicked += OnCounterClicked;
-		_cancelButton.Clicked += (o, e) => CancelledPressed = true;
+		_cancelButton.Clicked += (o, e) => _cancelledPressed = true;
 	}
 	private async void OnCounterClicked(object? sender, EventArgs e)
 	{
-		CancelledPressed = false;
+		_cancelledPressed = false;
 		_indicator.IsEnabled = true;
 		_indicator.IsRunning = true;
 		_cancelButton.IsEnabled = true;
@@ -64,33 +69,53 @@ public class MainPage : ContentPage
 		SocketManager.ClientResponseType response;
 		do
 		{
-			runningTask = Task.Run(() => GetSensorDataInstance());
-			SensorDataFormat? data = await runningTask;
-			if (data == null)
+			_runningTask = Task.Run(() => GetSensorDataInstance());
+			SensorDataFormat data_obj;
 			{
-				_cell.Text = "Error fetching Sensor Data!";
-				_cell.TextColor = Color.FromRgb(255, 0, 0);
-				break;
+				SensorDataFormat? data = await _runningTask;
+				if (data == null)
+				{
+					_cell.Text = "Error fetching Sensor Data!";
+					_cell.TextColor = Color.FromRgb(255, 0, 0);
+					break;
+				}
+				byte device = 0;
+				DeviceIdiom current = DeviceInfo.Current.Idiom;
+				if (current == DeviceIdiom.Phone) device = 1;
+				else if (current == DeviceIdiom.Tablet) device = 2;
+				else if (current == DeviceIdiom.TV) device = 3;
+				else if (current == DeviceIdiom.Desktop) device = 4;
+				else if (current == DeviceIdiom.Watch) device = 5;
+				else if (current == DeviceIdiom.Unknown) device = 6;
+				data_obj = data.Value;
+				data_obj.DeviceID = device;
 			}
-			_cell.Text = $"Sending data\n{data.Value.SerializedJsonString()}";
-			string address = _addressEntry.Text, port_text = _portEntry.Text;
-			if(SocketManager.CheckValid(address, port_text)==false)
+			_cell.Text = $"Sending data\n{data_obj.SerializedJsonString()}";
+			string address = _addressEntry.Text;
+			int port = SensorDataManager.SocketManager.Port;
+			if(SocketManager.CheckValid(address, port.ToString())==false)
 			{
 				_cell.Text = "Enter valid details!";
 				_cell.TextColor = Color.FromRgb(255, 0, 0);
 				break;
 			}
-			response = await SocketManager.ClientSendData(_addressEntry.Text, int.Parse(_portEntry.Text), data.Value.SerializedBytes());
+			byte mid;
+			(response, mid) = await SocketManager.ClientSendData(_addressEntry.Text, port, data_obj.SerializedBytes());
+			if(ID == 0)
+			{
+				ID = mid;
+				File.WriteAllText(_idFile, ID.ToString());
+			}
 			_cell.TextColor = response == SocketManager.ClientResponseType.AllOk ? Color.FromRgb(0, 255, 0) : Color.FromRgb(255, 0, 0);
 			_cell.Text = response switch
 			{
-				SocketManager.ClientResponseType.AllOk => $"Data sent successfully!, {response}",
+				SocketManager.ClientResponseType.AllOk => $"Data sent successfully! Identified as MachineID = {mid}",
 				SocketManager.ClientResponseType.CouldNotConnect => "Connection could not be made to the server",
 				SocketManager.ClientResponseType.GotWrongResponse => "Server denined the sent data",
 				_ => "Did not get a valid response from the server",
 			};
 		}
-		while (CancelledPressed == false && response == SocketManager.ClientResponseType.AllOk);
+		while (_cancelledPressed == false && response == SocketManager.ClientResponseType.AllOk);
 		_indicator.IsRunning = false;
 		_indicator.IsEnabled = false;
 		_cancelButton.IsEnabled = false;
@@ -105,15 +130,15 @@ public class MainPage : ContentPage
 			if (sensor.IsSupported && sensor.IsMonitoring == false)
 			{
 				// Turn on sensor
-				sensor.ReadingChanged += waitForReading;
+				sensor.ReadingChanged += WaitForReading;
 				sensor.Start(SensorSpeed.UI);
 				Task.Delay(DelayTime).Wait();
 				// Turn off sensor
 				sensor.Stop();
-				sensor.ReadingChanged -= waitForReading;
+				sensor.ReadingChanged -= WaitForReading;
 			}
 			return data;
-			void waitForReading(object? o, AccelerometerChangedEventArgs arg)
+			void WaitForReading(object? o, AccelerometerChangedEventArgs arg)
 			{
 				data = new(arg.Reading.Acceleration, true);
 			}
@@ -125,15 +150,15 @@ public class MainPage : ContentPage
 			if (sensor.IsSupported && sensor.IsMonitoring == false)
 			{
 				// Turn on sensor
-				sensor.ReadingChanged += waitForReading;
+				sensor.ReadingChanged += WaitForReading;
 				sensor.Start(SensorSpeed.UI);
 				Task.Delay(DelayTime).Wait();
 				// Turn off sensor
 				sensor.Stop();
-				sensor.ReadingChanged -= waitForReading;
+				sensor.ReadingChanged -= WaitForReading;
 			}
 			return data;
-			void waitForReading(object? o, BarometerChangedEventArgs arg)
+			void WaitForReading(object? o, BarometerChangedEventArgs arg)
 			{
 				data = new(arg.Reading.PressureInHectopascals, true);
 			}
@@ -145,15 +170,15 @@ public class MainPage : ContentPage
 			if (sensor.IsSupported && sensor.IsMonitoring == false)
 			{
 				// Turn on sensor
-				sensor.ReadingChanged += waitForReading;
+				sensor.ReadingChanged += WaitForReading;
 				sensor.Start(SensorSpeed.UI);
 				Task.Delay(DelayTime).Wait();
 				// Turn off sensor
 				sensor.Stop();
-				sensor.ReadingChanged -= waitForReading;
+				sensor.ReadingChanged -= WaitForReading;
 			}
 			return data;
-			void waitForReading(object? o, CompassChangedEventArgs arg)
+			void WaitForReading(object? o, CompassChangedEventArgs arg)
 			{
 				data = new(arg.Reading.HeadingMagneticNorth, true);
 			}
@@ -165,15 +190,15 @@ public class MainPage : ContentPage
 			if (sensor.IsSupported && sensor.IsMonitoring == false)
 			{
 				// Turn on sensor
-				sensor.ReadingChanged += waitForReading;
+				sensor.ReadingChanged += WaitForReading;
 				sensor.Start(SensorSpeed.UI);
 				Task.Delay(DelayTime).Wait();
 				// Turn off sensor
 				sensor.Stop();
-				sensor.ReadingChanged -= waitForReading;
+				sensor.ReadingChanged -= WaitForReading;
 			}
 			return data;
-			void waitForReading(object? o, GyroscopeChangedEventArgs arg)
+			void WaitForReading(object? o, GyroscopeChangedEventArgs arg)
 			{
 				data = new(arg.Reading.AngularVelocity, true);
 			}
@@ -185,15 +210,15 @@ public class MainPage : ContentPage
 			if (sensor.IsSupported && sensor.IsMonitoring == false)
 			{
 				// Turn on sensor
-				sensor.ReadingChanged += waitForReading;
+				sensor.ReadingChanged += WaitForReading;
 				sensor.Start(SensorSpeed.UI);
 				Task.Delay(DelayTime).Wait();
 				// Turn off sensor
 				sensor.Stop();
-				sensor.ReadingChanged -= waitForReading;
+				sensor.ReadingChanged -= WaitForReading;
 			}
 			return data;
-			void waitForReading(object? o, OrientationSensorChangedEventArgs arg)
+			void WaitForReading(object? o, OrientationSensorChangedEventArgs arg)
 			{
 				data = new(arg.Reading.Orientation, true);
 			}
@@ -207,6 +232,7 @@ public class MainPage : ContentPage
 				Compass = GetCompassData(),
 				Gyroscope = GetGyroscopeData(),
 				Orientation = GetOrientationData(),
+				MachineID = ID,
 			};
 		}
 		catch { return null; }
