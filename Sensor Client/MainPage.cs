@@ -25,8 +25,6 @@ public class MainPage : ContentPage
 		if (File.Exists(_idFile))
 			ID = byte.Parse(File.ReadAllText(_idFile));
 		_runningTask = null!;
-		else
-			ID++;
 		Content = new ScrollView()
 		{
 			Content = new VerticalStackLayout()
