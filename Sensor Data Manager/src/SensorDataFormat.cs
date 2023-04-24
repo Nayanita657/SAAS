@@ -1,8 +1,6 @@
-﻿using System.Numerics;
-using System.Runtime.Serialization.Formatters.Binary;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 namespace SensorDataManager
 {
 	[Serializable]
@@ -57,23 +55,23 @@ namespace SensorDataManager
 			}
 		}
 		/**
-         * <summary>
-         * The device (generally a phone or tablet) has a 3D coordinate system with the following axes: <br/>
+        <summary>
+        The device (generally a phone or tablet) has a 3D coordinate system with the following axes: <br/>
 
-The positive X-axis points to the right of the display in portrait mode.<br/>
-The positive Y-axis points to the top of the device in portrait mode.<br/>
-The positive Z-axis points out of the screen.<br/><br/>
-The 3D coordinate system of the Earth has the following axes:<br/>
+		The positive X-axis points to the right of the display in portrait mode.<br/>
+		The positive Y-axis points to the top of the device in portrait mode.<br/>
+		The positive Z-axis points out of the screen.<br/><br/>
+		The 3D coordinate system of the Earth has the following axes:<br/>
 
-The positive X-axis is tangent to the surface of the Earth and points east.<br/>
-The positive Y-axis is also tangent to the surface of the Earth and points north.<br/>
-The positive Z-axis is perpendicular to the surface of the Earth and points up.<br/>
-The Quaternion describes the rotation of the device's coordinate 
-system relative to the Earth's coordinate system.<br/><br/>
+		The positive X-axis is tangent to the surface of the Earth and points east.<br/>
+		The positive Y-axis is also tangent to the surface of the Earth and points north.<br/>
+		The positive Z-axis is perpendicular to the surface of the Earth and points up.<br/>
+		The Quaternion describes the rotation of the device's coordinate 
+		system relative to the Earth's coordinate system.<br/><br/>
 
-A Quaternion value is closely related to rotation around an axis. If an axis of 
-rotation is the normalized vector (x, y, z), 
-and the rotation angle is t, then the (X, Y, Z, W) components of the quaternion are: <br/>
+		A Quaternion value is closely related to rotation around an axis. If an axis of 
+		rotation is the normalized vector (x, y, z), 
+		and the rotation angle is t, then the (X, Y, Z, W) components of the quaternion are: <br/>
         (x.sin(t/2), y.sin(t/2), z.sin(t/2), cos(t/2))</summary>
          */
 		[Serializable] public struct OrientationDataFormat
@@ -97,7 +95,9 @@ and the rotation angle is t, then the (X, Y, Z, W) components of the quaternion 
 		public CompassDataFormat Compass;
 		public GyroscopeDataFormat Gyroscope;
 		public OrientationDataFormat Orientation;
-		public const int ByteSize = 61;
+		public byte DeviceID;
+		public byte MachineID;
+		public const int ByteSize = 63;
 		public string SerializedJsonString() =>
 			JsonSerializer.Serialize(this, new JsonSerializerOptions() { IncludeFields = true });
 		public static SensorDataFormat Deserialize(string jsonString) =>
@@ -128,7 +128,10 @@ and the rotation angle is t, then the (X, Y, Z, W) components of the quaternion 
 				writer.Write(Orientation.Y);
 				writer.Write(Orientation.Z);
 				writer.Write(Orientation.W);
-			}// Total size: (sizeof(bool) * 5) + (sizeof(float) * 10) + (sizeof(double)*2) = 61 bytes
+
+				writer.Write(DeviceID);
+				writer.Write(MachineID);
+			}// Total size: (sizeof(bool) * 5) + (sizeof(float) * 10) + (sizeof(double)*2) + (2*sizeof(byte)) = 63 bytes
 			return stream.ToArray();
 		}
 		public static SensorDataFormat Deserialize(byte[] bytes)
@@ -159,6 +162,9 @@ and the rotation angle is t, then the (X, Y, Z, W) components of the quaternion 
 				x.Orientation.Y = reader.ReadSingle();
 				x.Orientation.Z = reader.ReadSingle();
 				x.Orientation.W = reader.ReadSingle();
+
+				x.DeviceID = reader.ReadByte();
+				x.MachineID = reader.ReadByte();
 			}
 			return x;
 		}
